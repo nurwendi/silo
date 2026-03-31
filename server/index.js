@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { AccessToken } = require('livekit-server-sdk');
 const cors = require('cors');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -21,7 +22,13 @@ const io = new Server(server, {
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'secret';
 
+// In-memory data structures (Use a DB like MongoDB/Postgres for production)
+const users = new Map(); // username -> { passwordHash, salt, encryptedVault }
 const tokenStore = new Map(); // token -> { roomId, password }
+
+function hashPassword(password, salt) {
+  return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+}
 
 function generateToken() {
   const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
@@ -32,26 +39,60 @@ function generateToken() {
   return token;
 }
 
-// Endpoint to generate LiveKit Access Token
-app.get('/getToken', async (req, res) => {
-  const room = req.query.room;
-  const identity = req.query.identity;
+// --- AUTH API ---
 
-  if (!room || !identity) {
-    return res.status(400).json({ error: 'Missing room or identity' });
-  }
+app.post('/auth/signup', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).send('Missing params');
+  if (users.has(username)) return res.status(400).send('User already exists');
 
-  const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
-    identity: identity,
-  });
-
-  at.addGrant({ roomJoin: true, room: room, canPublish: true, canSubscribe: true });
-
-  const token = await at.toJwt();
-  res.json({ token });
+  const salt = crypto.randomBytes(16).toString('hex');
+  const passwordHash = hashPassword(password, salt);
+  
+  users.set(username, { passwordHash, salt, encryptedVault: null });
+  res.json({ success: true });
 });
 
-// Endpoint to register a room PIN/Token
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  const user = users.get(username);
+  if (!user) return res.status(404).send('User not found');
+
+  const hash = hashPassword(password, user.salt);
+  if (hash === user.passwordHash) {
+    res.json({ success: true, vault: user.encryptedVault });
+  } else {
+    res.status(401).send('Invalid password');
+  }
+});
+
+// --- SYNC API ---
+
+app.post('/sync/push', (req, res) => {
+  const { username, password, vault } = req.body;
+  const user = users.get(username);
+  if (!user) return res.status(404).send('User not found');
+
+  const hash = hashPassword(password, user.salt);
+  if (hash === user.passwordHash) {
+    user.encryptedVault = vault;
+    res.json({ success: true });
+  } else {
+    res.status(401).send('Unauthorized');
+  }
+});
+
+// --- ROOM & TOKEN API ---
+
+app.get('/getToken', async (req, res) => {
+  const { room, identity } = req.query;
+  if (!room || !identity) return res.status(400).json({ error: 'Missing room or identity' });
+
+  const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, { identity });
+  at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
+  res.json({ token: await at.toJwt() });
+});
+
 app.post('/registerToken', (req, res) => {
   const { roomId, password } = req.body;
   if (!roomId || !password) return res.status(400).send('Missing params');
@@ -69,40 +110,26 @@ app.post('/registerToken', (req, res) => {
     while (tokenStore.has(token)) token = generateToken();
     tokenStore.set(token, { roomId, password });
   }
-
   res.json({ token });
 });
 
-// Endpoint to resolve a room PIN/Token
 app.get('/resolveToken/:token', (req, res) => {
   const { token } = req.params;
   const data = tokenStore.get(token.toLowerCase());
-  if (data) {
-    res.json(data);
-  } else {
-    res.status(404).send('Token not found');
-  }
+  if (data) res.json(data);
+  else res.status(404).send('Token not found');
 });
 
-// Socket.io for Real-time Signaling & Relay
-io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+// --- SOCKET.IO ---
 
+io.on('connection', (socket) => {
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
-    console.log(`User ${socket.id} joined room ${roomId}`);
   });
 
   socket.on('send-message', (data) => {
     const { roomId, message, sender, type, id, expiresAt } = data;
-    socket.to(roomId).emit('receive-message', {
-      id,
-      message, 
-      type,
-      sender,
-      timestamp: Date.now(),
-      expiresAt
-    });
+    socket.to(roomId).emit('receive-message', { id, message, type, sender, timestamp: Date.now(), expiresAt });
   });
 
   socket.on('msg-ack', (data) => {
@@ -111,12 +138,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('lock-room', (data) => {
-    const { roomId, locked } = data;
-    socket.to(roomId).emit('room-lock-status', { locked });
-  });
-
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    socket.to(data.roomId).emit('room-lock-status', { locked: data.locked });
   });
 });
 

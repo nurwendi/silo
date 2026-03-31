@@ -1,72 +1,126 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, TextInput, TouchableOpacity, View, Text, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
+import { StyleSheet, TextInput, TouchableOpacity, View, Text, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { encryptVault, decryptVault } from '../../utils/vault';
 
 const SIGNAL_SERVER_URL = 'http://localhost:3000';
 
 export default function HomeScreen() {
-  const [room, setRoom] = useState('');
+  const [isLoginMode, setIsLoginMode] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [roomOrToken, setRoomOrToken] = useState('');
+  const [roomPassword, setRoomPassword] = useState('');
+  
   const [loading, setLoading] = useState(false);
   const [recentTokens, setRecentTokens] = useState<string[]>([]);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
-    loadRecentTokens();
+    checkLoggedIn();
   }, []);
 
-  const loadRecentTokens = async () => {
-    try {
-      const saved = await AsyncStorage.getItem('recent_tokens');
-      if (saved) setRecentTokens(JSON.parse(saved));
-    } catch (e) {
-      console.error('Failed to load tokens');
+  const checkLoggedIn = async () => {
+    const user = await AsyncStorage.getItem('auth_user');
+    if (user) {
+        const parsed = JSON.parse(user);
+        setUsername(parsed.username);
+        setPassword(parsed.password);
+        setIsLoggedIn(true);
+        loadLocalData();
     }
+  };
+
+  const loadLocalData = async () => {
+    const saved = await AsyncStorage.getItem('recent_tokens');
+    if (saved) setRecentTokens(JSON.parse(saved));
+  };
+
+  const handleAuth = async () => {
+    if (!username || !password) return Alert.alert('Error', 'Please fill username and password');
+    setLoading(true);
+    try {
+        const endpoint = isLoginMode ? '/auth/login' : '/auth/signup';
+        const response = await fetch(`${SIGNAL_SERVER_URL}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            await AsyncStorage.setItem('auth_user', JSON.stringify({ username, password }));
+            setIsLoggedIn(true);
+            
+            if (isLoginMode && data.vault) {
+                const decrypted = await decryptVault(data.vault, password);
+                if (decrypted.tokens) {
+                    setRecentTokens(decrypted.tokens);
+                    await AsyncStorage.setItem('recent_tokens', JSON.stringify(decrypted.tokens));
+                }
+            }
+            Alert.alert('Success', isLoginMode ? 'Logged in' : 'Account created');
+        } else {
+            const err = await response.text();
+            Alert.alert('Error', err);
+        }
+    } catch (e) {
+        Alert.alert('Error', 'Connection failed');
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const syncVault = async (updatedTokens: string[]) => {
+      if (!isLoggedIn) return;
+      try {
+          const vault = await encryptVault({ tokens: updatedTokens }, password);
+          await fetch(`${SIGNAL_SERVER_URL}/sync/push`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password, vault })
+          });
+      } catch (e) {
+          console.error('Sync failed', e);
+      }
   };
 
   const saveToken = async (token: string) => {
-    const updated = [token, ...recentTokens.filter(t => t !== token)].slice(0, 5);
+    const updated = [token, ...recentTokens.filter(t => t !== token)].slice(0, 10);
     setRecentTokens(updated);
     await AsyncStorage.setItem('recent_tokens', JSON.stringify(updated));
-  };
-
-  const resolveToken = async (token: string) => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${SIGNAL_SERVER_URL}/resolveToken/${token.toLowerCase()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setRoom(data.roomId);
-        setPassword(data.password);
-        saveToken(token.toUpperCase());
-        setLoading(false);
-        return data;
-      } else {
-        setLoading(false);
-        Alert.alert('Invalid Token', 'This Silo Token is not registered or has expired.');
-        return null;
-      }
-    } catch (e) {
-      setLoading(false);
-      Alert.alert('Error', 'Connection to signaling server failed.');
-      return null;
-    }
+    syncVault(updated);
   };
 
   const handleJoin = async () => {
-    let finalRoom = room;
-    let finalPass = password;
+    if (!isLoggedIn) return Alert.alert('Auth Required', 'Please login or signup first');
 
-    if (room.length === 5 && !password) {
-        const data = await resolveToken(room);
-        if (data) {
-            finalRoom = data.roomId;
-            finalPass = data.password;
-        } else return;
+    let finalRoom = roomOrToken;
+    let finalPass = roomPassword;
+
+    if (roomOrToken.length === 5 && !roomPassword) {
+        setLoading(true);
+        try {
+            const response = await fetch(`${SIGNAL_SERVER_URL}/resolveToken/${roomOrToken.toLowerCase()}`);
+            if (response.ok) {
+                const data = await response.json();
+                finalRoom = data.roomId;
+                finalPass = data.password;
+                saveToken(roomOrToken.toUpperCase());
+            } else {
+                Alert.alert('Invalid Token', 'Token not found');
+                return;
+            }
+        } catch (e) {
+            Alert.alert('Error', 'Connection failed');
+            return;
+        } finally {
+            setLoading(false);
+        }
     }
 
     if (finalRoom && username && finalPass) {
@@ -75,16 +129,21 @@ export default function HomeScreen() {
         params: { room: finalRoom, username, password: finalPass }
       });
     } else {
-        Alert.alert('Missing Info', 'Please provide Username and either a Token or Room/Password combination.');
+        Alert.alert('Error', 'Please provide Token or Room/Password');
     }
+  };
+
+  const logout = async () => {
+      await AsyncStorage.multiRemove(['auth_user', 'recent_tokens']);
+      setIsLoggedIn(false);
+      setRecentTokens([]);
+      setUsername('');
+      setPassword('');
   };
 
   return (
     <LinearGradient colors={['#0b141a', '#2e0101']} style={styles.container}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <BlurView intensity={40} tint="dark" style={styles.glassCard}>
             <View style={styles.iconContainer}>
@@ -94,80 +153,93 @@ export default function HomeScreen() {
             </View>
             
             <Text style={styles.title}>Silo Secure</Text>
-            <Text style={styles.subtitle}>Privacy-First E2EE Communication</Text>
+            <Text style={styles.subtitle}>{isLoggedIn ? `Welcome, @${username}` : 'Private Account System'}</Text>
 
-            <View style={styles.inputGroup}>
-               <View style={styles.inputWrapper}>
-                  <Ionicons name="key" size={20} color="#ef4444" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Silo Token or Room Name"
-                    placeholderTextColor="#888"
-                    value={room}
-                    onChangeText={setRoom}
-                    autoCapitalize="none"
-                  />
-               </View>
-
-               <View style={styles.inputWrapper}>
-                  <Ionicons name="person" size={20} color="#ef4444" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Your Alias"
-                    placeholderTextColor="#888"
-                    value={username}
-                    onChangeText={setUsername}
-                  />
-               </View>
-
-               <View style={styles.inputWrapper}>
-                  <Ionicons name="lock-closed" size={20} color="#ef4444" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Room Key (Optional for Token)"
-                    placeholderTextColor="#888"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                  />
-               </View>
-            </View>
-
-            <TouchableOpacity 
-                style={styles.button} 
-                onPress={handleJoin}
-                disabled={loading}
-            >
-              <LinearGradient 
-                colors={['#ef4444', '#991b1b']} 
-                start={{x:0, y:0}} 
-                end={{x:1, y:0}} 
-                style={styles.buttonGradient}
-              >
-                <Text style={styles.buttonText}>{loading ? 'Connecting...' : 'Secure Connect'}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {recentTokens.length > 0 && (
-                <View style={styles.recentSection}>
-                    <Text style={styles.recentTitle}>Recent Tokens</Text>
-                    <View style={styles.tokenContainer}>
-                        {recentTokens.map(t => (
-                            <TouchableOpacity 
-                                key={t} 
-                                style={styles.tokenBadge} 
-                                onPress={() => { setRoom(t); setPassword(''); }}
-                            >
-                                <Text style={styles.tokenText}>{t}</Text>
-                            </TouchableOpacity>
-                        ))}
+            {!isLoggedIn ? (
+                <View style={styles.authForm}>
+                    <View style={styles.inputWrapper}>
+                        <Ionicons name="person" size={20} color="#ef4444" style={styles.inputIcon} />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Username"
+                            placeholderTextColor="#888"
+                            value={username}
+                            onChangeText={setUsername}
+                            autoCapitalize="none"
+                        />
                     </View>
+                    <View style={styles.inputWrapper}>
+                        <Ionicons name="lock-closed" size={20} color="#ef4444" style={styles.inputIcon} />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Account Password"
+                            placeholderTextColor="#888"
+                            value={password}
+                            onChangeText={setPassword}
+                            secureTextEntry
+                        />
+                    </View>
+                    <TouchableOpacity style={styles.button} onPress={handleAuth} disabled={loading}>
+                        <LinearGradient colors={['#ef4444', '#991b1b']} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.buttonGradient}>
+                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{isLoginMode ? 'Login to Silo' : 'Create Account'}</Text>}
+                        </LinearGradient>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setIsLoginMode(!isLoginMode)} style={styles.toggleAuth}>
+                        <Text style={styles.toggleText}>{isLoginMode ? "Don't have an account? Sign up" : 'Already have an account? Login'}</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <View style={styles.mainForm}>
+                    <View style={styles.inputWrapper}>
+                        <Ionicons name="key" size={20} color="#ef4444" style={styles.inputIcon} />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Silo Token or Room Name"
+                            placeholderTextColor="#888"
+                            value={roomOrToken}
+                            onChangeText={setRoomOrToken}
+                            autoCapitalize="none"
+                        />
+                    </View>
+                    <View style={styles.inputWrapper}>
+                        <Ionicons name="lock-open" size={20} color="#ef4444" style={styles.inputIcon} />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Room Key (Optional for Token)"
+                            placeholderTextColor="#888"
+                            value={roomPassword}
+                            onChangeText={setRoomPassword}
+                            secureTextEntry
+                        />
+                    </View>
+                    <TouchableOpacity style={styles.button} onPress={handleJoin} disabled={loading}>
+                        <LinearGradient colors={['#ef4444', '#991b1b']} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.buttonGradient}>
+                            <Text style={styles.buttonText}>{loading ? 'Resolving...' : 'Connect to Room'}</Text>
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    {recentTokens.length > 0 && (
+                        <View style={styles.recentSection}>
+                            <Text style={styles.recentTitle}>Synced Contacts / Tokens</Text>
+                            <View style={styles.tokenContainer}>
+                                {recentTokens.map(t => (
+                                    <TouchableOpacity key={t} style={styles.tokenBadge} onPress={() => { setRoomOrToken(t); setRoomPassword(''); }}>
+                                        <Text style={styles.tokenText}>{t}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+
+                    <TouchableOpacity onPress={logout} style={styles.logoutBtn}>
+                        <Text style={styles.logoutText}>Logout from this device</Text>
+                    </TouchableOpacity>
                 </View>
             )}
 
             <View style={styles.footer}>
               <Ionicons name="shield-half" size={16} color="#ef4444" />
-              <Text style={styles.footerText}>Zero-Knowledge: Keys stay on your device.</Text>
+              <Text style={styles.footerText}>E2EE: Server cannot read your synced vault.</Text>
             </View>
           </BlurView>
         </ScrollView>
@@ -177,127 +249,30 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  glassCard: {
-    padding: 30,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-    alignItems: 'center',
-  },
-  iconContainer: {
-     marginBottom: 20,
-  },
-  iconGradient: {
-     width: 100,
-     height: 100,
-     borderRadius: 50,
-     justifyContent: 'center',
-     alignItems: 'center',
-     shadowColor: '#ef4444',
-     shadowOffset: { width: 0, height: 10 },
-     shadowOpacity: 0.3,
-     shadowRadius: 20,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  subtitle: {
-    color: '#888',
-    fontSize: 14,
-    marginTop: 8,
-    marginBottom: 30,
-  },
-  inputGroup: {
-    width: '100%',
-    gap: 15,
-    marginBottom: 30,
-  },
-  inputWrapper: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-     borderRadius: 15,
-     borderWidth: 1,
-     borderColor: 'rgba(255, 255, 255, 0.1)',
-     paddingHorizontal: 15,
-  },
-  inputIcon: {
-     marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 15,
-    color: '#fff',
-    fontSize: 16,
-  },
-  button: {
-    width: '100%',
-    borderRadius: 15,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  buttonGradient: {
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  recentSection: {
-      width: '100%',
-      marginTop: 30,
-  },
-  recentTitle: {
-      color: '#aaa',
-      fontSize: 12,
-      fontWeight: 'bold',
-      marginBottom: 10,
-      textTransform: 'uppercase',
-  },
-  tokenContainer: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-  },
-  tokenBadge: {
-      backgroundColor: 'rgba(255, 255, 255, 0.05)',
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  tokenText: {
-      color: '#fff',
-      fontSize: 12,
-      fontWeight: 'bold',
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 30,
-    gap: 8,
-  },
-  footerText: {
-    color: '#666',
-    fontSize: 12,
-  },
+  container: { flex: 1 },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  glassCard: { padding: 30, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', overflow: 'hidden', alignItems: 'center' },
+  iconContainer: { marginBottom: 20 },
+  iconGradient: { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', shadowColor: '#ef4444', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20 },
+  title: { color: '#fff', fontSize: 32, fontWeight: 'bold', letterSpacing: 1 },
+  subtitle: { color: '#888', fontSize: 14, marginTop: 8, marginBottom: 30 },
+  authForm: { width: '100%', gap: 15 },
+  mainForm: { width: '100%', gap: 15 },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 15, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 15 },
+  inputIcon: { marginRight: 10 },
+  input: { flex: 1, paddingVertical: 15, color: '#fff', fontSize: 16 },
+  button: { width: '100%', borderRadius: 15, overflow: 'hidden', marginTop: 10 },
+  buttonGradient: { paddingVertical: 18, alignItems: 'center' },
+  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  toggleAuth: { marginTop: 10, alignItems: 'center' },
+  toggleText: { color: '#aaa', fontSize: 14 },
+  recentSection: { width: '100%', marginTop: 20 },
+  recentTitle: { color: '#aaa', fontSize: 10, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase' },
+  tokenContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  tokenBadge: { backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  tokenText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  logoutBtn: { marginTop: 20, alignItems: 'center' },
+  logoutText: { color: '#ef4444', fontSize: 12, opacity: 0.7 },
+  footer: { flexDirection: 'row', alignItems: 'center', marginTop: 30, gap: 8 },
+  footerText: { color: '#666', fontSize: 11 },
 });
