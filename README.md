@@ -1,50 +1,50 @@
-# Welcome to your Expo app 👋
+# Silo Secure 🛡️
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A ultra-private, WhatsApp-like communication app focused on **Zero-Knowledge** architecture and **End-to-End Encryption (E2EE)**.
 
-## Get started
+## 🚀 Vision
+Silo was built for users who demand absolute privacy. No data is stored on the server. Your messages, images, voice, and files are only decrypted on the devices involved in the conversation.
 
-1. Install dependencies
+## ✨ Key Features
+- **E2EE Chat**: AES-256-GCM encryption for all text messages.
+- **Secure Multimedia**: Encrypted image, voice message (PTT), and document sharing.
+- **E2EE Video/Voice Calls**: Real-time media streams encrypted via LiveKit E2EEManager.
+- **Disappearing Messages**: Self-destructing messages with configurable timers (1m, 1h, 24h).
+- **Zero-Storage Relay**: Node.js signaling server only relays encrypted blobs and tokens; it has no database.
+- **Room Security**: One-tap "Room Lock" to prevent new joins once a session has started.
+- **Premium UI**: Modern Blue/Red theme with glassmorphism and smooth interactions.
 
-   ```bash
-   npm install
-   ```
+## 🛠️ Architecture
+- **Frontend**: React Native (Expo) with TypeScript.
+- **Backend**: Node.js, Socket.io (Signaling), LiveKit (Media).
+- **Cryptography**: `@noble/ciphers` for AES-GCM, `expo-crypto` for key derivation (SHA-256).
 
-2. Start the app
+## 🏃 Getting Started
 
-   ```bash
-   npx expo start
-   ```
+### 1. Prerequisite
+- Node.js & npm
+- [LiveKit Server](https://livekit.io/) (Cloud or Self-Hosted)
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
+### 2. Setup Server
 ```bash
-npm run reset-project
+cd server
+npm install
+# Create .env with LIVEKIT_API_KEY and LIVEKIT_API_SECRET
+node index.js
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 3. Setup Frontend
+```bash
+npm install
+npx expo start
+```
+Use **Expo Go** on Android/iOS to test.
 
-## Learn more
+## 🛡️ Privacy Protocol
+1. **Derivation**: Your room password is never sent. It's used locally to derive a 256-bit key.
+2. **Encryption**: Every message is encrypted with a unique IV (Initialization Vector) before leaving the device.
+3. **Decryption**: The recipient uses the same room password to derive the key and decrypt the content.
+4. **No Logs**: The signaling server processes relay events in-memory only.
 
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+---
+Built with ❤️ for Privacy.
