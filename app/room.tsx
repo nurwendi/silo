@@ -13,6 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AudioPlayer from '../components/AudioPlayer';
 import { VideoView, TrackReference, useTracks } from '@livekit/react-native';
 import { Track } from 'livekit-client';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const SIGNAL_SERVER_URL = 'http://localhost:3000';
 
@@ -244,140 +246,138 @@ export default function RoomScreen() {
     );
   }
 
-  // Hook to get video tracks for rendering
-  // Note: This works best if RoomScreen is wrapped in <LiveKitRoom room={room}>
-  // But since we use direct Room management, we can pass it manually if needed or use a sub-component.
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.roomName}>{roomName}</Text>
-          <TouchableOpacity onPress={cycleDisappearing} style={styles.encryptionBadge}>
-            <Ionicons name="time" size={12} color={disappearingTime > 0 ? '#00a884' : '#888'} />
-            <Text style={[styles.encryptionText, disappearingTime > 0 && { color: '#00a884' }]}>
-              {disappearingTime === 0 ? 'Persistent' : disappearingTime === 60000 ? '1 Min' : disappearingTime === 3600000 ? '1 Hour' : '24 Hours'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.headerActions}>
-           <TouchableOpacity onPress={toggleRoomLock} style={styles.actionIcon}>
-            <Ionicons name={isRoomLocked ? 'lock-closed' : 'lock-open'} size={24} color={isRoomLocked ? '#ef4444' : '#fff'} />
-          </TouchableOpacity>
-           <TouchableOpacity onPress={() => setShowChat(!showChat)} style={styles.actionIcon}>
-            <Ionicons name={showChat ? 'videocam' : 'chatbubbles'} size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={[styles.mediaContainer, !showChat && { flex: 1 }]}>
-         {room ? (
-            <ParticipantVideoGrid room={room} />
-         ) : (
-            <View style={styles.loadingMedia}>
-               <Text style={styles.loadingText}>Initializing E2EE Media...</Text>
+    <LinearGradient colors={['#0b141a', '#2e0101']} style={styles.container}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <BlurView intensity={40} tint="dark" style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerInfo}>
+            <Text style={styles.roomName}>{roomName}</Text>
+            <TouchableOpacity onPress={cycleDisappearing} style={styles.encryptionBadge}>
+                <Ionicons name="time" size={12} color={disappearingTime > 0 ? '#ef4444' : '#888'} />
+                <Text style={[styles.encryptionText, disappearingTime > 0 && { color: '#ef4444' }]}>
+                {disappearingTime === 0 ? 'Persistent' : disappearingTime === 60000 ? '1 Min' : disappearingTime === 3600000 ? '1 Hour' : '24 Hours'}
+                </Text>
+            </TouchableOpacity>
             </View>
-         )}
-         
-         <View style={styles.mediaFooter}>
-            <TouchableOpacity onPress={toggleMic} style={[styles.mediaButton, !isMicEnabled && styles.mediaButtonOff]}>
-                <Ionicons name={isMicEnabled ? 'mic' : 'mic-off'} size={24} color="#fff" />
+            <View style={styles.headerActions}>
+            <TouchableOpacity onPress={toggleRoomLock} style={styles.actionIcon}>
+                <Ionicons name={isRoomLocked ? 'lock-closed' : 'lock-open'} size={24} color={isRoomLocked ? '#ef4444' : '#fff'} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={toggleCam} style={[styles.mediaButton, !isCamEnabled && styles.mediaButtonOff]}>
-                <Ionicons name={isCamEnabled ? 'videocam' : 'videocam-off'} size={24} color="#fff" />
+            <TouchableOpacity onPress={() => setShowChat(!showChat)} style={styles.actionIcon}>
+                <Ionicons name={showChat ? 'videocam' : 'chatbubbles'} size={24} color="#fff" />
             </TouchableOpacity>
-         </View>
-      </View>
+            </View>
+        </BlurView>
 
-      {showChat && (
-        <>
-          <FlatList
-            data={messages}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <View style={[styles.messageBubble, item.isSelf ? styles.selfMessage : styles.otherMessage]}>
-                {!item.isSelf && <Text style={styles.messageSender}>{item.sender}</Text>}
-                {item.type === 'text' && <Text style={styles.messageText}>{item.content}</Text>}
-                {item.type === 'image' && (
-                  <Image source={{ uri: `data:image/jpeg;base64,${item.content}` }} style={styles.messageImage} />
-                )}
-                {item.type === 'voice' && <AudioPlayer uri={item.content} />}
-                {item.type === 'file' && (
-                   <TouchableOpacity onPress={() => openFile(item.content)} style={styles.fileContainer}>
-                      <Ionicons name="document" size={24} color="#fff" />
-                      <Text style={styles.fileNameText} numberOfLines={1}>{item.fileName}</Text>
-                   </TouchableOpacity>
-                )}
-                <View style={styles.messageFooter}>
-                  <Text style={styles.messageTime}>
-                    {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                  {item.isSelf && (
-                    <Ionicons 
-                      name={item.status === 'delivered' ? 'checkmark-done' : 'checkmark'} 
-                      size={14} 
-                      color={item.status === 'delivered' ? '#ef4444' : '#888'} 
-                      style={styles.tick}
-                    />
-                  )}
-                  {item.expiresAt && <Ionicons name="time-outline" size={12} color="#aaa" style={{ marginLeft: 4 }} />}
+        <View style={[styles.mediaContainer, !showChat && { flex: 1 }]}>
+            {room ? (
+                <ParticipantVideoGrid room={room} />
+            ) : (
+                <View style={styles.loadingMedia}>
+                <Text style={styles.loadingText}>Initializing E2EE Media...</Text>
                 </View>
-              </View>
             )}
-            contentContainerStyle={styles.chatList}
-          />
-
-          <View style={styles.inputArea}>
-            <TouchableOpacity style={styles.actionButton} onPress={pickImage}>
-               <Ionicons name="image" size={24} color="#00a884" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={pickDocument}>
-               <Ionicons name="attach" size={26} color="#00a884" />
-            </TouchableOpacity>
             
-            {isRecording ? (
-              <View style={styles.recordingIndicator}>
-                <View style={styles.dot} />
-                <Text style={styles.recordingText}>Recording...</Text>
-              </View>
-            ) : (
-              <TextInput
-                style={styles.chatInput}
-                placeholder="Message"
-                placeholderTextColor="#888"
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-              />
-            )}
+            <View style={styles.mediaFooter}>
+                <TouchableOpacity onPress={toggleMic} style={[styles.mediaButton, !isMicEnabled && styles.mediaButtonOff]}>
+                    <Ionicons name={isMicEnabled ? 'mic' : 'mic-off'} size={24} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={toggleCam} style={[styles.mediaButton, !isCamEnabled && styles.mediaButtonOff]}>
+                    <Ionicons name={isCamEnabled ? 'videocam' : 'videocam-off'} size={24} color="#fff" />
+                </TouchableOpacity>
+            </View>
+        </View>
 
-            {inputText.length > 0 ? (
-              <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-                <Ionicons name="send" size={20} color="#fff" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity 
-                style={[styles.sendButton, isRecording && styles.recordingButton]} 
-                onPressIn={startRecording}
-                onPressOut={stopRecording}
-              >
-                <Ionicons name="mic" size={20} color="#fff" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </>
-      )}
-    </KeyboardAvoidingView>
+        {showChat && (
+            <>
+            <FlatList
+                data={messages}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                <View style={[styles.messageBubble, item.isSelf ? styles.selfMessage : styles.otherMessage]}>
+                    {!item.isSelf && <Text style={styles.messageSender}>{item.sender}</Text>}
+                    {item.type === 'text' && <Text style={styles.messageText}>{item.content}</Text>}
+                    {item.type === 'image' && (
+                    <Image source={{ uri: `data:image/jpeg;base64,${item.content}` }} style={styles.messageImage} />
+                    )}
+                    {item.type === 'voice' && <AudioPlayer uri={item.content} />}
+                    {item.type === 'file' && (
+                    <TouchableOpacity onPress={() => openFile(item.content)} style={styles.fileContainer}>
+                        <Ionicons name="document" size={24} color="#fff" />
+                        <Text style={styles.fileNameText} numberOfLines={1}>{item.fileName}</Text>
+                    </TouchableOpacity>
+                    )}
+                    <View style={styles.messageFooter}>
+                    <Text style={styles.messageTime}>
+                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    {item.isSelf && (
+                        <Ionicons 
+                        name={item.status === 'delivered' ? 'checkmark-done' : 'checkmark'} 
+                        size={14} 
+                        color={item.status === 'delivered' ? '#ef4444' : '#888'} 
+                        style={styles.tick}
+                        />
+                    )}
+                    {item.expiresAt && <Ionicons name="time-outline" size={12} color="#aaa" style={{ marginLeft: 4 }} />}
+                    </View>
+                </View>
+                )}
+                contentContainerStyle={styles.chatList}
+            />
+
+            <BlurView intensity={30} tint="dark" style={styles.inputArea}>
+                <TouchableOpacity style={styles.actionButton} onPress={pickImage}>
+                <Ionicons name="image" size={24} color="#ef4444" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionButton} onPress={pickDocument}>
+                <Ionicons name="attach" size={26} color="#ef4444" />
+                </TouchableOpacity>
+                
+                {isRecording ? (
+                <View style={styles.recordingIndicator}>
+                    <View style={styles.dot} />
+                    <Text style={styles.recordingText}>Recording...</Text>
+                </View>
+                ) : (
+                <TextInput
+                    style={styles.chatInput}
+                    placeholder="E2EE Message"
+                    placeholderTextColor="#888"
+                    value={inputText}
+                    onChangeText={setInputText}
+                    multiline
+                />
+                )}
+
+                {inputText.length > 0 ? (
+                <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
+                    <Ionicons name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+                ) : (
+                <TouchableOpacity 
+                    style={[styles.sendButton, isRecording && styles.recordingButton]} 
+                    onPressIn={startRecording}
+                    onPressOut={stopRecording}
+                >
+                    <Ionicons name="mic" size={20} color="#fff" />
+                </TouchableOpacity>
+                )}
+            </BlurView>
+            </>
+        )}
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
-// Sub-component to render the video grid
 function ParticipantVideoGrid({ room }: { room: any }) {
     const tracks = useTracks(
       [
@@ -410,7 +410,6 @@ function ParticipantVideoGrid({ room }: { room: any }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0b141a',
   },
   centered: {
     flex: 1,
@@ -422,11 +421,10 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingHorizontal: 16,
     paddingBottom: 12,
-    backgroundColor: '#1f2c34',
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#2a3942',
+    borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   headerInfo: {
     flex: 1,
@@ -456,7 +454,7 @@ const styles = StyleSheet.create({
   },
   mediaContainer: {
     height: 250,
-    backgroundColor: '#000',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     overflow: 'hidden',
   },
   loadingMedia: {
@@ -481,7 +479,9 @@ const styles = StyleSheet.create({
   videoView: {
      flex: 1,
      backgroundColor: '#1f2c34',
-     borderRadius: 10,
+     borderRadius: 15,
+     borderWidth: 1,
+     borderColor: 'rgba(255,255,255,0.1)',
   },
   participantOverlay: {
      position: 'absolute',
@@ -521,6 +521,8 @@ const styles = StyleSheet.create({
       borderRadius: 22,
       justifyContent: 'center',
       alignItems: 'center',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.1)',
   },
   mediaButtonOff: {
       backgroundColor: '#ef4444',
@@ -531,14 +533,11 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: '85%',
-    padding: 10,
-    borderRadius: 15,
+    padding: 12,
+    borderRadius: 20,
     marginBottom: 10,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   selfMessage: {
     alignSelf: 'flex-end',
@@ -565,16 +564,18 @@ const styles = StyleSheet.create({
   messageImage: {
     width: 240,
     height: 180,
-    borderRadius: 10,
+    borderRadius: 15,
     marginBottom: 4,
   },
   fileContainer: {
      flexDirection: 'row',
      alignItems: 'center',
-     padding: 10,
-     backgroundColor: 'rgba(0,0,0,0.2)',
-     borderRadius: 10,
+     padding: 12,
+     backgroundColor: 'rgba(255,255,255,0.05)',
+     borderRadius: 15,
      gap: 10,
+     borderWidth: 1,
+     borderColor: 'rgba(255,255,255,0.1)',
   },
   fileNameText: {
      color: '#fff',
@@ -597,24 +598,26 @@ const styles = StyleSheet.create({
   inputArea: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    backgroundColor: '#1f2c34',
+    padding: 12,
     borderTopWidth: 1,
-    borderTopColor: '#2a3942',
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    paddingBottom: Platform.OS === 'ios' ? 30 : 12,
   },
   actionButton: {
     padding: 10,
   },
   chatInput: {
     flex: 1,
-    backgroundColor: '#2a3942',
-    borderRadius: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
     paddingHorizontal: 20,
     paddingVertical: 10,
     color: '#fff',
     fontSize: 16,
     maxHeight: 120,
     marginHorizontal: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   recordingIndicator: {
     flex: 1,
@@ -626,39 +629,40 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#ff4b4b',
+    backgroundColor: '#ef4444',
     marginRight: 10,
   },
   recordingText: {
-    color: '#ff4b4b',
+    color: '#ef4444',
     fontSize: 16,
     fontWeight: '700',
   },
   sendButton: {
-    backgroundColor: '#00a884',
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    backgroundColor: '#ef4444',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 2,
+    shadowRadius: 8,
+    elevation: 5,
   },
   recordingButton: {
-    backgroundColor: '#ff4b4b',
+    backgroundColor: '#ef4444',
     transform: [{ scale: 1.15 }],
   },
   errorText: {
-    color: '#ff4b4b',
+    color: '#ef4444',
     fontSize: 16,
     marginBottom: 20,
   },
   backButton: {
     paddingVertical: 14,
     paddingHorizontal: 24,
-    backgroundColor: '#00a884',
+    backgroundColor: '#ef4444',
     borderRadius: 10,
   },
   backText: {
