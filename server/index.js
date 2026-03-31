@@ -21,6 +21,17 @@ const io = new Server(server, {
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'secret';
 
+const tokenStore = new Map(); // token -> { roomId, password }
+
+function generateToken() {
+  const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+  let token = '';
+  for (let i = 0; i < 5; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+}
+
 // Endpoint to generate LiveKit Access Token
 app.get('/getToken', async (req, res) => {
   const room = req.query.room;
@@ -40,7 +51,40 @@ app.get('/getToken', async (req, res) => {
   res.json({ token });
 });
 
-// Socket.io for Real-time Signaling & Relay (No Database Storage)
+// Endpoint to register a room PIN/Token
+app.post('/registerToken', (req, res) => {
+  const { roomId, password } = req.body;
+  if (!roomId || !password) return res.status(400).send('Missing params');
+
+  let token;
+  for (const [t, data] of tokenStore.entries()) {
+    if (data.roomId === roomId && data.password === password) {
+      token = t;
+      break;
+    }
+  }
+
+  if (!token) {
+    token = generateToken();
+    while (tokenStore.has(token)) token = generateToken();
+    tokenStore.set(token, { roomId, password });
+  }
+
+  res.json({ token });
+});
+
+// Endpoint to resolve a room PIN/Token
+app.get('/resolveToken/:token', (req, res) => {
+  const { token } = req.params;
+  const data = tokenStore.get(token.toLowerCase());
+  if (data) {
+    res.json(data);
+  } else {
+    res.status(404).send('Token not found');
+  }
+});
+
+// Socket.io for Real-time Signaling & Relay
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -49,10 +93,8 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined room ${roomId}`);
   });
 
-  // Relay encrypted messages between participants in a room
   socket.on('send-message', (data) => {
     const { roomId, message, sender, type, id, expiresAt } = data;
-    // Broadcast to others in the room
     socket.to(roomId).emit('receive-message', {
       id,
       message, 
@@ -63,11 +105,14 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle message delivery acknowledgment
   socket.on('msg-ack', (data) => {
     const { roomId, msgId, from } = data;
-    // Notify the room that the message was delivered to someone
     socket.to(roomId).emit('msg-delivered', { msgId, from });
+  });
+
+  socket.on('lock-room', (data) => {
+    const { roomId, locked } = data;
+    socket.to(roomId).emit('room-lock-status', { locked });
   });
 
   socket.on('disconnect', () => {

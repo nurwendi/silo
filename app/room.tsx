@@ -205,6 +205,23 @@ export default function RoomScreen() {
     setIsRoomLocked(newStatus);
   };
 
+  const shareToken = async () => {
+    try {
+      const response = await fetch(`${SIGNAL_SERVER_URL}/registerToken`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId: roomName, password })
+      });
+      const data = await response.json();
+      Alert.alert('Silo Token', `Share this token with your contact: ${data.token.toUpperCase()}`, [
+        { text: 'Copy', onPress: () => { /* Add Clipboard logic if available */ } },
+        { text: 'OK' }
+      ]);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to generate token');
+    }
+  };
+
   const startRecording = async () => {
     try {
       const permission = await Audio.requestPermissionsAsync();
@@ -267,6 +284,9 @@ export default function RoomScreen() {
             </TouchableOpacity>
             </View>
             <View style={styles.headerActions}>
+            <TouchableOpacity onPress={shareToken} style={styles.actionIcon}>
+                <Ionicons name="share-social" size={24} color="#fff" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={toggleRoomLock} style={styles.actionIcon}>
                 <Ionicons name={isRoomLocked ? 'lock-closed' : 'lock-open'} size={24} color={isRoomLocked ? '#ef4444' : '#fff'} />
             </TouchableOpacity>
