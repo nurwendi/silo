@@ -1,81 +1,61 @@
 # Silo Secure - Zero-Knowledge E2EE Communication
 
-Silo Secure is a privacy-first, zero-knowledge communication application for Android. It features end-to-end encrypted chat, multimedia sharing (images, voice, files), and real-time audio/video calls using LiveKit.
+Silo Secure is a privacy-first, zero-knowledge communication application for Android. It features end-to-end encrypted chat, multimedia sharing, and real-time audio/video calls using LiveKit, all wrapped in a premium **Flat Glassmorphism** design.
 
-## 🌟 Features
-- **Flat Glassmorphism UI**: Premium, modern design with transparent overlays and vibrant gradients.
-- **Zero-Knowledge Architecture**: The signaling server only relays encrypted blobs; no messages or keys are stored server-side.
-- **End-to-End Encryption (E2EE)**: AES-256-GCM encryption for all text, images, voice messages, and media streams.
-- **WhatsApp-like Experience**: Push-to-Talk (PTT), file sharing, delivery ticks, and image previews.
-- **Self-Destructing Messages**: Set timers (1m, 1h, 24h) for messages to auto-delete for all participants.
-- **Room Security**: Lock rooms to prevent new participants from joining.
+## 🌟 Key Features
+- **Silo Account System**: Create a secure account to sync your tokens and contacts across devices.
+- **Zero-Knowledge Sync**: Your "Vault" (contacts, tokens) is encrypted locally using your password before being synced to the server.
+- **Silo Tokens (BBM-style)**: Generate a 5-digit alphanumeric code to share access to encrypted rooms easily.
+- **E2EE Multimedia**: AES-256-GCM encryption for text, images, PTT voice messages, and files.
+- **Glassmorphism UI**: High-end visual identity with frosted glass effects and deep gradients.
+- **Room Locking**: Owners can lock rooms to prevent new intruders from joining.
 
 ---
 
 ## 🚀 Installation & Setup
 
-Follow these steps to run Silo Secure on another computer:
-
 ### 1. Prerequisites
 - **Node.js**: v20 or later.
-- **Expo Go**: Installed on your Android device (or an Android Emulator).
-- **LiveKit Server**: You need a LiveKit instance (Self-hosted or Cloud).
+- **Expo Go**: Installed on your Android device.
+- **LiveKit**: Credentials for a LiveKit Cloud or self-hosted instance.
 
-### 2. Clone the Repository
+### 2. Clone & Install
 ```bash
 git clone https://github.com/nurwendi/silo.git
 cd silo
+npm install
+cd server && npm install && cd ..
 ```
 
-### 3. Install Dependencies
-Install dependencies for both the App and the Signaling Server:
-```bash
-# Root directory (App)
-npm install
-
-# Server directory
-cd server
-npm install
-cd ..
-```
-
-### 4. Configuration
-Create a `.env` file in the `server` directory with your LiveKit credentials:
+### 3. Configuration
+Create a `.env` file in the `server` directory:
 ```env
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
 LIVEKIT_URL=https://your-project.livekit.cloud
 ```
 
-### 5. Running the Application
+### 4. Running the Application
 
 #### A. Start the Signaling Server
 ```bash
 cd server
 node index.js
 ```
+*The server will run on **port 5000** (default).*
 
 #### B. Start the Expo App
-Open a new terminal in the root directory:
 ```bash
 npx expo start
 ```
-- Scan the QR code with **Expo Go** on your Android device.
-- Ensure your device is on the same network as your computer, or use a tunneling service like Ngrok for the server.
+- Scan the QR code with **Expo Go** on Android.
+- Ensure the `SIGNAL_SERVER_URL` in `app/(tabs)/index.tsx` points to your computer's local IP (e.g., `http://192.168.1.15:5000`).
 
 ---
 
-## 🛠 Tech Stack
-- **Frontend**: React Native (Expo), TypeScript, `expo-blur`, `expo-linear-gradient`.
-- **E2EE**: `@noble/ciphers` (AES-GCM), `expo-crypto`.
-- **Real-time**: `socket.io-client` for signaling, `livekit-client` for media.
-- **Media**: `expo-av` (Audio), `expo-image-picker`, `expo-document-picker`.
+## 🔒 Security & Privacy
+- **Stateless Server**: No chat logs, images, or audio files are saved. The server is a blind relay.
+- **No Cleartext Keys**: Encryption keys never leave your device.
+- **Password Hashing**: Passwords are hashed using PBKDF2 with unique salts before being sent for authentication.
 
-## 🔒 Security Principles
-- **Local Key Derivation**: Encryption keys are derived from your room password using PBKDF2/SHA-256 entirely on your device.
-- **No Persistence**: The signaling server is stateless. No chat logs, images, or audio files are saved to any database.
-- **Encrypted Media**: LiveKit streams are encrypted using the same key provider, ensuring even the LiveKit server cannot see your video/audio.
-
----
-
-Designed with ❤️ for absolute privacy.
+Designed for absolute privacy and visual excellence.

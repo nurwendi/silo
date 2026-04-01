@@ -172,7 +172,9 @@ export default function HomeScreen() {
   };
 
   const logout = async () => {
-      await AsyncStorage.multiRemove(['auth_user', 'recent_tokens', 'user_profile']);
+      await AsyncStorage.removeItem('auth_user');
+      await AsyncStorage.removeItem('recent_tokens');
+      await AsyncStorage.removeItem('user_profile');
       setIsLoggedIn(false);
       setRecentTokens([]);
       setUsername('');
