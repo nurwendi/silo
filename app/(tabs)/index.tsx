@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { encryptVault, decryptVault } from '../../utils/vault';
 
-const SIGNAL_SERVER_URL = 'http://localhost:3000';
+const SIGNAL_SERVER_URL = 'http://localhost:5000';
 
 export default function HomeScreen() {
   const [isLoginMode, setIsLoginMode] = useState(true);
