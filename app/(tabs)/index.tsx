@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, TextInput, TouchableOpacity, View, Text, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, TextInput, TouchableOpacity, View, Text, KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Modal, Image } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { encryptVault, decryptVault } from '../../utils/vault';
 
 const SIGNAL_SERVER_URL = 'http://localhost:3000';
@@ -16,6 +17,10 @@ export default function HomeScreen() {
   const [roomOrToken, setRoomOrToken] = useState('');
   const [roomPassword, setRoomPassword] = useState('');
   
+  const [displayName, setDisplayName] = useState('');
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [isProfileModalVisible, setProfileModalVisible] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [recentTokens, setRecentTokens] = useState<string[]>([]);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -36,8 +41,15 @@ export default function HomeScreen() {
   };
 
   const loadLocalData = async () => {
-    const saved = await AsyncStorage.getItem('recent_tokens');
-    if (saved) setRecentTokens(JSON.parse(saved));
+    const savedTokens = await AsyncStorage.getItem('recent_tokens');
+    if (savedTokens) setRecentTokens(JSON.parse(savedTokens));
+
+    const savedProfile = await AsyncStorage.getItem('user_profile');
+    if (savedProfile) {
+        const profile = JSON.parse(savedProfile);
+        setDisplayName(profile.name || '');
+        setAvatar(profile.avatar || null);
+    }
   };
 
   const handleAuth = async () => {
@@ -62,8 +74,14 @@ export default function HomeScreen() {
                     setRecentTokens(decrypted.tokens);
                     await AsyncStorage.setItem('recent_tokens', JSON.stringify(decrypted.tokens));
                 }
+                if (decrypted.profile) {
+                    setDisplayName(decrypted.profile.name || '');
+                    setAvatar(decrypted.profile.avatar || null);
+                    await AsyncStorage.setItem('user_profile', JSON.stringify(decrypted.profile));
+                }
             }
-            Alert.alert('Success', isLoginMode ? 'Logged in' : 'Account created');
+            if (!isLoginMode) setProfileModalVisible(true);
+            Alert.alert('Success', isLoginMode ? 'Logged in' : 'Account created. Please set your profile.');
         } else {
             const err = await response.text();
             Alert.alert('Error', err);
@@ -75,10 +93,11 @@ export default function HomeScreen() {
     }
   };
 
-  const syncVault = async (updatedTokens: string[]) => {
+  const syncVault = async (updatedTokens: string[], updatedProfile?: any) => {
       if (!isLoggedIn) return;
       try {
-          const vault = await encryptVault({ tokens: updatedTokens }, password);
+          const profileToSync = updatedProfile || { name: displayName, avatar };
+          const vault = await encryptVault({ tokens: updatedTokens, profile: profileToSync }, password);
           await fetch(`${SIGNAL_SERVER_URL}/sync/push`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -87,6 +106,25 @@ export default function HomeScreen() {
       } catch (e) {
           console.error('Sync failed', e);
       }
+  };
+
+  const saveProfile = async () => {
+    const profile = { name: displayName, avatar };
+    await AsyncStorage.setItem('user_profile', JSON.stringify(profile));
+    setProfileModalVisible(false);
+    syncVault(recentTokens, profile);
+  };
+
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.5,
+      base64: true,
+    });
+    if (!result.canceled && result.assets[0].base64) {
+      setAvatar(result.assets[0].base64);
+    }
   };
 
   const saveToken = async (token: string) => {
@@ -126,7 +164,7 @@ export default function HomeScreen() {
     if (finalRoom && username && finalPass) {
       router.push({
         pathname: '/room',
-        params: { room: finalRoom, username, password: finalPass }
+        params: { room: finalRoom, username: displayName || username, password: finalPass }
       });
     } else {
         Alert.alert('Error', 'Please provide Token or Room/Password');
@@ -134,11 +172,13 @@ export default function HomeScreen() {
   };
 
   const logout = async () => {
-      await AsyncStorage.multiRemove(['auth_user', 'recent_tokens']);
+      await AsyncStorage.multiRemove(['auth_user', 'recent_tokens', 'user_profile']);
       setIsLoggedIn(false);
       setRecentTokens([]);
       setUsername('');
       setPassword('');
+      setDisplayName('');
+      setAvatar(null);
   };
 
   return (
@@ -146,14 +186,18 @@ export default function HomeScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <BlurView intensity={40} tint="dark" style={styles.glassCard}>
-            <View style={styles.iconContainer}>
-               <LinearGradient colors={['#ef4444', '#004a87']} style={styles.iconGradient}>
-                  <Ionicons name="shield-checkmark" size={60} color="#fff" />
-               </LinearGradient>
-            </View>
+            <TouchableOpacity style={styles.profileBtn} onPress={() => isLoggedIn && setProfileModalVisible(true)}>
+               {avatar ? (
+                   <Image source={{ uri: `data:image/jpeg;base64,${avatar}` }} style={styles.avatarImg} />
+               ) : (
+                   <View style={styles.avatarPlaceholder}>
+                       <Ionicons name="person" size={40} color="#fff" />
+                   </View>
+               )}
+            </TouchableOpacity>
             
             <Text style={styles.title}>Silo Secure</Text>
-            <Text style={styles.subtitle}>{isLoggedIn ? `Welcome, @${username}` : 'Private Account System'}</Text>
+            <Text style={styles.subtitle}>{isLoggedIn ? `Welcome, ${displayName || username}` : 'Private Account System'}</Text>
 
             {!isLoggedIn ? (
                 <View style={styles.authForm}>
@@ -239,10 +283,48 @@ export default function HomeScreen() {
 
             <View style={styles.footer}>
               <Ionicons name="shield-half" size={16} color="#ef4444" />
-              <Text style={styles.footerText}>E2EE: Server cannot read your synced vault.</Text>
+              <Text style={styles.footerText}>E2EE: Server cannot read your profile.</Text>
             </View>
           </BlurView>
         </ScrollView>
+
+        <Modal
+            visible={isProfileModalVisible}
+            transparent={true}
+            animationType="slide"
+        >
+            <View style={styles.modalBg}>
+                <BlurView intensity={90} tint="dark" style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Your Identity</Text>
+                    <TouchableOpacity style={styles.modalAvatar} onPress={pickImage}>
+                        {avatar ? (
+                            <Image source={{ uri: `data:image/jpeg;base64,${avatar}` }} style={styles.modalAvatarImg} />
+                        ) : (
+                            <View style={styles.modalAvatarPlaceholder}>
+                                <Ionicons name="camera" size={40} color="#888" />
+                            </View>
+                        )}
+                        <View style={styles.editBadge}>
+                            <Ionicons name="pencil" size={12} color="#fff" />
+                        </View>
+                    </TouchableOpacity>
+
+                    <TextInput
+                        style={styles.modalInput}
+                        placeholder="Display Name"
+                        placeholderTextColor="#888"
+                        value={displayName}
+                        onChangeText={setDisplayName}
+                    />
+
+                    <TouchableOpacity style={styles.button} onPress={saveProfile}>
+                        <LinearGradient colors={['#ef4444', '#991b1b']} style={styles.buttonGradient}>
+                            <Text style={styles.buttonText}>Save Profile</Text>
+                        </LinearGradient>
+                    </TouchableOpacity>
+                </BlurView>
+            </View>
+        </Modal>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -252,8 +334,9 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
   glassCard: { padding: 30, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', overflow: 'hidden', alignItems: 'center' },
-  iconContainer: { marginBottom: 20 },
-  iconGradient: { width: 100, height: 100, borderRadius: 50, justifyContent: 'center', alignItems: 'center', shadowColor: '#ef4444', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20 },
+  profileBtn: { marginBottom: 20 },
+  avatarImg: { width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: '#ef4444' },
+  avatarPlaceholder: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#ef4444' },
   title: { color: '#fff', fontSize: 32, fontWeight: 'bold', letterSpacing: 1 },
   subtitle: { color: '#888', fontSize: 14, marginTop: 8, marginBottom: 30 },
   authForm: { width: '100%', gap: 15 },
@@ -275,4 +358,12 @@ const styles = StyleSheet.create({
   logoutText: { color: '#ef4444', fontSize: 12, opacity: 0.7 },
   footer: { flexDirection: 'row', alignItems: 'center', marginTop: 30, gap: 8 },
   footerText: { color: '#666', fontSize: 11 },
+  modalBg: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalContent: { padding: 40, borderTopLeftRadius: 30, borderTopRightRadius: 30, alignItems: 'center' },
+  modalTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
+  modalAvatar: { marginBottom: 20 },
+  modalAvatarImg: { width: 120, height: 120, borderRadius: 60, borderWidth: 3, borderColor: '#ef4444' },
+  modalAvatarPlaceholder: { width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center', borderStyle: 'dashed', borderWidth: 2, borderColor: '#444' },
+  editBadge: { position: 'absolute', bottom: 5, right: 5, backgroundColor: '#ef4444', width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  modalInput: { width: '100%', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 15, padding: 18, color: '#fff', fontSize: 18, marginBottom: 30, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }
 });
